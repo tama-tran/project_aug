@@ -1,0 +1,192 @@
+---
+title: "Downstream_Analysis"
+format: html
+---
+
+```{r}
+source("code/packages.R")
+source("code/functions.R")
+```
+
+```{r}
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+library(patchwork)
+library(pheatmap)
+library(ggplotify)
+```
+`
+### Macrophage extraction
+
+```{r}
+combined <- readRDS("../results/RDS/combined.rds")
+
+macro <- subset(combined, my_annotation == "Macrophage")
+
+macro$old_clusters <- macro$seurat_clusters
+
+macro$condition <- as.character(macro$condition)
+macro$condition[macro$condition == "cirrhosis"] <- "Cirrhosis"
+
+Idents(macro) <- "condition" 
+
+gc()
+```
+
+### M1M2 đã làm 
+
+```{r}
+m1_genes <- list(c("CD86", "CD80", "HLA-DRA",  "TLR2", "TLR4", "NOS2")) 
+m2_genes <- list(c("CD163","MRC1", "RETN", "CLEC7A","ARG1", "CD200R1", "CD209")) 
+
+macro <- AddModuleScore(macro, features = m1_genes, name = "M1_Score")
+macro <- AddModuleScore(macro, features = m2_genes, name = "M2_Score")
+
+colnames(macro@meta.data)[colnames(macro@meta.data) == "M1_Score1"] <- "M1_Score"
+colnames(macro@meta.data)[colnames(macro@meta.data) == "M2_Score1"] <- "M2_Score"
+```
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+
+macro$condition <- factor(macro$condition, levels = c("HBV", "Cirrhosis", "HCC")) 
+
+p1 <- ggplot(macro@meta.data, aes(condition, M1_Score, fill = condition)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", outlier.shape = NA) +
+  scale_fill_manual(values = c(HBV = "#B30600", Cirrhosis = "#2347BD", HCC = "#29AF34")) +
+  theme_classic() +
+  labs(title = "M1 scores in Macrophages", x = "Stages of Liver Disease", y = "M1 score", fill = "group") +
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    legend.title = element_text(size = 12), 
+    legend.text = element_text(size = 11),
+    legend.position = "none"
+  ) +
+  
+  stat_compare_means(
+    comparisons = list(c("HBV", "Cirrhosis"), c("Cirrhosis", "HCC"), c("HBV", "HCC")), 
+    method = "wilcox.test", label = "p.signif", hide.ns = FALSE, label.y = c(1.10, 1.25, 1.40))
+
+p2 <- ggplot(macro@meta.data, aes(condition, M2_Score, fill = condition)) +
+  geom_violin(trim = FALSE) +
+  geom_boxplot(width = 0.15, fill = "white", color = "black", outlier.shape = NA) +
+  scale_fill_manual(values = c(HBV = "#B30600", Cirrhosis = "#2347BD", HCC = "#29AF34")) +
+  theme_classic() +
+  labs(title = "M2 scores in Macrophages", x = "Stages of Liver Disease", y = "M2 score", fill = "group") +
+  theme(
+    plot.title = element_text(hjust = 0.5), 
+    legend.title = element_text(size = 12), 
+    legend.text = element_text(size = 11)
+  ) +
+  stat_compare_means(
+    comparisons = list(c("HBV", "Cirrhosis"), c("Cirrhosis", "HCC"), c("HBV", "HCC")), 
+    method = "wilcox.test", label = "p.signif", hide.ns = FALSE, label.y = c(1.10, 1.25, 1.40))
+
+pp <- p1 +p2
+pp
+
+ggsave("../results/pictures/Fig S2.png", pp, width = 10, height = 6, dpi = 300)
+```
+
+```{r}
+macro_degs <- FindMarkers(
+  macro , 
+  ident.1 = "Cirrhosis", 
+  ident.2 = "HCC", 
+  min.pct = 0.25,
+  logfc.threshold = 0.25,
+  test.use        = "wilcox",
+  only.pos = FALSE 
+)
+```
+
+### GO/KEGG
+```{r}
+# ### Fig 1 D  ## downregulated in Cirrhosis = upregulated in HCC
+# rank_degs <- macro_degs %>%
+#   filter(avg_log2FC < (-0.25), p_val_adj < 0.01 & pct.1 < 0.5, pct.2 > 0.25)
+
+# ### Fig 1 C   ## upregulated in Cirrhosis
+rank_degs <- macro_degs %>%
+  filter(avg_log2FC >0.25, p_val_adj < 0.01 & pct.1 > 0.25,  pct.2 < 0.50)
+
+bg_genes <- rownames(macro)
+
+counts_matrix <- Seurat::GetAssayData(macro, layer = "counts")
+
+bg_genes <- rownames(counts_matrix[Matrix::rowSums(counts_matrix > 0) >= 3, ])
+
+rank_degs$cluster <- "Macrophage"
+
+BP <- run_enrichment(rank_degs, type = "GO", ontology = "BP", universe_genes = bg_genes)
+#MF <- run_enrichment(rank_degs, type = "GO", ontology = "MF", universe_genes = bg_genes)
+#CC <- run_enrichment(rank_degs, type = "GO", ontology = "CC", universe_genes = bg_genes)
+#KEGG <- run_enrichment(rank_degs, type = "KEGG", universe_genes = bg_genes)
+
+#save(BP, MF, CC, KEGG, bg_genes, file = "../results/GOKEGG_macro_3.RData" )
+
+processed_df <- BP %>%
+  filter(p.adjust < 0.05) %>%
+  mutate(GeneRatio_num = sapply(GeneRatio, function(x) eval(parse(text = x))))
+
+top_macro <- processed_df %>%
+  filter(cluster == "Macrophage") %>% 
+  arrange(desc(GeneRatio_num))
+
+ top15_macro <- top_macro  %>%
+    filter(Description != "muscle structure development") %>%
+    slice_head(n = 15)
+
+# TOP 10
+top10_macro <- top_macro  %>%
+   slice_head(n = 10)
+
+top10_macro <- top10_macro %>%
+  mutate(Description = str_wrap(Description, width = 45))
+
+description_order <- top10_macro %>%
+  arrange(GeneRatio_num) %>% # arange(tăng dần), arange(desc(giảm gẫn))
+  pull(Description) %>%
+  unique()
+
+top10_macro$Description <- factor(top10_macro$Description, levels = description_order)
+
+# DOTPLOT
+p_macro <- ggplot(top10_macro, aes(x = GeneRatio_num, y = Description)) +
+
+  geom_point(
+    aes(size = Count, fill = -log10(p.adjust)), 
+    shape = 21,        
+    color = "black",    
+    stroke = 0.8       
+  ) +
+  # Thang màu cho ruột (fill)
+  scale_fill_viridis_c(option = "magma", direction = 1) +
+  scale_size_continuous(range = c(4, 9)) +
+  theme_bw(base_size = 12) +
+  guides( fill = guide_colorbar(order = 1), size = guide_legend(order = 2)
+  ) +          
+  labs(
+    title = "Top 10 Enriched GO Terms: Macrophages",
+    x = "Gene Ratio",
+    y = "GO Term (Biological Process)",
+    color = "-log10(adj.p)", size = "Gene Count"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13, hjust = 0.5),
+    axis.text.y = element_text(size = 11, color = "black"),
+    axis.text.x = element_text(size = 10, color = "black"),
+    axis.title = element_text(face = "bold"),
+    panel.grid.major = element_line(color = "grey92", linetype = "dashed")
+  )
+
+# 
+print(p_macro)
+
+ggsave( "../results/pictures/Fig 2C.png", 
+  plot = p_macro, width = 9.5, height = 6.5, dpi = 300)
+```

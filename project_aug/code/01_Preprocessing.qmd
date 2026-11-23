@@ -1,0 +1,359 @@
+---
+title: "Preprocessing"
+format: html
+---
+
+```{r}
+source("packages.R")
+source("functions.R")
+```
+
+###==== GSE136103 ==== # 
+
+```{r}
+base_dir <- "../data/GSE136103_Data/use" 
+
+sample_dirs <- list.dirs(
+  base_dir,
+  recursive = FALSE,
+  full.names = TRUE
+)
+
+seurat_list_1 <- lapply(seq_along(sample_dirs), function(i){
+
+  sample_path <- sample_dirs[i]
+
+  sample_name <- basename(sample_path)
+
+  counts <- Read10X(sample_path)
+
+  obj <- CreateSeuratObject(
+    counts = counts,
+    project = "GSE136103",
+    min.cells = 3,
+    min.features = 200
+  )
+
+  obj$sample <- sample_name
+  obj$sample_id <- i + 0 
+  obj$dataset <- "GSE136103"
+  obj$condition <- "cirrhosis"
+
+  obj[["percent.mt"]] <- PercentageFeatureSet(
+    obj,
+    pattern = "^MT-"
+  )
+
+  obj
+
+})
+
+names(seurat_list_1) <- paste0(
+  "sample_",
+  1:9
+)
+```
+
+
+```{r}
+qc_before <- get_qc_summary(seurat_list_1)
+qc_before
+```
+
+```{r}
+plot_vln_qc(seurat_list_1)
+plot_scatter_qc(seurat_list_1)
+```
+
+```{r}
+
+qc_threshold_1 <- data.frame(
+  max_feature = c(3500, 4500, 4500, 4000, 4500, 4500, 4000, 3500, 4000),
+  max_count   = c(20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000, 20000),
+  max_mt      = c(25, 25, 25, 25, 25, 25, 25, 25, 25), 
+  min_feature = c(300, 300, 300, 300, 300, 300, 300, 300, 300)
+)
+
+seurat_list_1 <- filter_qc(seurat_list_1, qc_threshold_1)
+
+```
+
+```{r}
+plot_scatter_qc(seurat_list_1)
+plot_vln_qc(seurat_list_1)
+```
+
+```{r}
+qc_after <- get_qc_summary(seurat_list_1)
+qc_after
+```
+
+```{r}
+saveRDS(seurat_list_1, file = "results/RDS/seurat_list_1.rds")
+```
+
+###==== GSE186343 ==== # 
+```{r}
+install.packages("hdf5r")
+
+library(hdf5r)
+base_dir <- "../data/GSE186343_Data/use"
+
+sample_files <- list.files(
+  base_dir,
+  pattern = "\\.h5$",
+  full.names = TRUE
+)
+
+seurat_list_2 <- lapply(seq_along(sample_files), function(i){
+
+  file <- sample_files[i]
+
+  sample_name <- tools::file_path_sans_ext(basename(file))
+
+  counts <- Read10X_h5(file)
+
+  obj <- CreateSeuratObject(
+    counts = counts,
+    project = "GSE186343",
+    min.cells = 3,
+    min.features = 200
+  )
+
+  obj$sample <- sample_name
+  obj$sample_id <- i + 9
+  obj$dataset <- "GSE186343"
+  obj$condition <- "HBV"
+
+  obj[["percent.mt"]] <- PercentageFeatureSet(
+    obj,
+    pattern = "^MT-"
+  )
+
+  obj
+
+})
+
+names(seurat_list_2) <- paste0(
+  "sample_",
+  10:14
+)
+```
+
+```{r}
+qc_before <- get_qc_summary(seurat_list_2)
+qc_before
+```
+
+```{r}
+# tự chỉnh qc_threshold
+qc_threshold_2 <- data.frame(
+  max_feature = c(4500, 4500, 4500, 4500, 4500),
+  max_count   = c(20000, 20000, 20000, 20000, 20000),
+  max_mt      = c(25, 25, 25, 25, 25),
+  min_feature = c(300, 300, 300, 300, 300)
+)
+
+seurat_list_2 <- filter_qc(seurat_list_2, qc_threshold_2)
+```
+
+```{r}
+plot_vln_qc(seurat_list_2)
+plot_scatter_qc(seurat_list_2)
+```
+
+```{r}
+qc_after <- get_qc_summary(seurat_list_2)
+qc_after
+```
+
+```{r}
+saveRDS(seurat_list_2, file = "../results/RDS/seurat_list_2.rds")
+```
+
+###==== GSE242889 ==== # 
+```{r}
+
+base_dir <- "../data/GSE242889_Data/use" 
+
+gene_files <- list.files(
+  base_dir,
+  pattern = "^genes\\.tsv\\.gz$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+gene_files
+for (f in gene_files) {
+  new_name <- file.path(
+    dirname(f),
+    "features.tsv.gz"
+  )
+  file.rename(f, new_name)
+}
+```
+
+```{r}
+base_dir <- "../data/GSE242889_Data/use"
+
+sample_dirs <- list.dirs(
+  base_dir,
+  recursive = FALSE,
+  full.names = TRUE
+)
+
+seurat_list_3 <- lapply(seq_along(sample_dirs), function(i){
+
+  sample_path <- sample_dirs[i]
+
+  sample_name <- basename(sample_path)
+
+  counts <- Read10X(sample_path)
+
+  obj <- CreateSeuratObject(
+    counts = counts,
+    project = "GSE242889",
+    min.cells = 3,
+    min.features = 200
+  )
+
+  obj$sample <- sample_name
+  obj$sample_id <- i + 14
+  obj$dataset <- "GSE242889"
+  obj$condition <- "HCC"
+
+  obj[["percent.mt"]] <- PercentageFeatureSet(
+    obj,
+    pattern = "^MT-"
+  )
+
+  obj
+
+})
+
+names(seurat_list_3) <- paste0(
+  "sample_",
+  15:19
+)
+```
+
+```{r}
+qc_before <- get_qc_summary(seurat_list_3)
+qc_before
+```
+
+```{r}
+plot_vln_qc(seurat_list_3)
+plot_scatter_qc(seurat_list_3)
+```
+
+```{r}
+qc_after <- get_qc_summary(seurat_list_3)
+qc_after
+```
+
+```{r}
+saveRDS(seurat_list_3, file = "../results/RDS/seurat_list_3.rds")
+```
+
+###==== GSE202642 ==== # 
+```{r}
+sample_path <- "../data/GSE202642_Data/use"   
+
+counts <- Read10X(sample_path)
+
+obj <- CreateSeuratObject(
+  counts = counts,
+  #project = "GSE202642",
+  min.cells = 3,
+  min.features = 200
+)
+
+obj$sample <- "GSE202642"
+obj$sample_id <- 20
+obj$dataset <- "GSE202642"
+obj$condition <- "HCC"
+
+obj[["percent.mt"]] <- PercentageFeatureSet(
+  obj,
+  pattern = "^MT-"
+)
+```
+
+```{r}
+obj$cell_barcode <- rownames(obj@meta.data)
+
+obj$sample_suffix <- sapply(strsplit(obj$cell_barcode, "-"), `[`, 2)
+
+head(obj@meta.data[, c("cell_barcode", "sample_suffix")], 10)
+```
+
+```{r}
+table(obj$sample_suffix)
+```
+
+```{r}
+# Select 7 samples (T)
+obj <- subset(
+  obj,
+  subset = sample_suffix %in% as.character(1:7)
+)
+```
+
+```{r}
+# Split obj
+seurat_list_4 <- SplitObject(
+  obj,
+  split.by = "sample_suffix"
+)
+
+names(seurat_list_4) <- paste0("sample_", 20:26)
+```
+
+```{r}
+for(i in seq_along(seurat_list_4)){
+
+  seurat_list_4[[i]]$sample_id <- as.numeric(
+    sub(
+      "sample_",
+      "",
+      names(seurat_list_4)[i]
+    )
+  )
+}
+```
+
+```{r}
+qc_before <- get_qc_summary(seurat_list_4)
+qc_before
+```
+
+```{r}
+plot_vln_qc(seurat_list_4)
+plot_scatter_qc(seurat_list_4)
+```
+
+```{r}
+qc_threshold_4 <- data.frame(
+  max_feature = c(3500, 3500, 3500, 4500, 4500, 4500, 4500),
+  max_count   = c(20000, 20000, 20000, 20000, 20000, 20000, 20000),
+  max_mt      = c(25, 25, 25, 25, 25, 25, 25),
+  min_feature = c(300, 300, 300, 300, 300, 300, 300)
+)
+
+seurat_list_4 <- filter_qc(seurat_list_4, qc_threshold_4)
+```
+
+```{r}
+plot_vln_qc(seurat_list_4)
+plot_scatter_qc(seurat_list_4)
+```
+
+```{r}
+qc_after <- get_qc_summary(seurat_list_4)
+qc_after
+```
+
+```{r}
+saveRDS(seurat_list_4, file = "../results/RDS/seurat_list_4.rds")
+```

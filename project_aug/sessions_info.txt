@@ -1,0 +1,4 @@
+R 4.6.0
+Seurat 5.5.0
+dplyr 1.2.1
+tidyverse 2.0.0

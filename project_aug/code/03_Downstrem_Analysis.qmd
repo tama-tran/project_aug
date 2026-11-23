@@ -1,0 +1,622 @@
+---
+title: "Downstream_Analysis"
+format: html
+---
+
+```{r}
+source("code/packages.R")
+source("code/functions.R")
+```
+
+```{r}
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+library(patchwork)
+library(pheatmap)
+library(ggplotify)
+```
+
+```{r}
+combined <- readRDS("../results/RDS/integrated_obj.rds")
+```
+
+```{r}
+markers <- FindAllMarkers(
+  combined,
+  only.pos = TRUE,
+  min.pct = 0.25,
+  logfc.threshold = 0.25,
+  test.use        = "wilcox"
+)
+```
+
+```{r}
+write.csv(markers, "../results/All_cluster_markers_0308.csv") 
+```
+
+```{r}
+save(markers, file = "../results/all_markers_0308.RData")
+```
+
+```{r}
+load("../results/all_markers_0308.RData")
+```
+
+#### === Annotation === ###
+```{r}
+all_markers <- markers
+```
+
+```{r}
+### Ranking
+top_markers <- all_markers %>%
+  filter(
+    p_val_adj  < 0.05,
+    avg_log2FC > 0.5,
+    pct.1      > 0.25,
+    pct.2      < 0.50
+  ) %>%
+  mutate(
+    specificity_score = pct.1 - pct.2,
+    rank_score        = avg_log2FC * specificity_score
+  ) %>%
+  group_by(cluster) %>%
+  arrange(desc(rank_score), .by_group = TRUE) %>%
+  ungroup()
+
+clusters <- sort(unique(top_markers$cluster))
+cat("Clusters found:", paste(clusters, collapse = ", "), "\n")
+```
+
+```{r}
+### Source 1.1: Canonical marker list from github
+canonical_markers <- list(
+  "T_cell"                = c("CD3D","CD3E","CD3G","TRAC"),
+  "CD4_T"                 = c("CD4","IL7R","MAL","LEF1"),
+  "CD8_T"                 = c("CD8A","CD8B","GZMK","GZMA"),
+  "T_naive"               = c("CCR7","SELL","TCF7","LEF1"),
+  "T_effector_memory"     = c("GZMB","PRF1","IFNG","FASLG"),
+  "T_exhausted"           = c("PDCD1","HAVCR2","LAG3","TIGIT","TOX"),
+  "Treg"                  = c("FOXP3","IL2RA","CTLA4","TIGIT"),
+  "B_cell"                = c("CD19","MS4A1","CD79A","CD79B","IGHM"),
+  "Plasma_cell"           = c("MZB1","IGHG1","SDC1","PRDM1","XBP1"),
+  "NK_cell"               = c("GNLY","NKG7","KLRD1","NCAM1","FCGR3A"),
+  "Monocyte_classical"    = c("CD14","LYZ","S100A8","S100A9","FCN1"),
+  "Monocyte_nonclassical" = c("FCGR3A","MS4A7","CDKN1C","LST1"),
+  "Macrophage"            = c("CD68","MRC1","CSF1R","C1QA","C1QB"),
+  "DC_myeloid"            = c("FCER1A","CLEC10A","CD1C","CLEC9A"),
+  "DC_plasmacytoid"       = c("LILRA4","IL3RA","CLEC4C","GZMB"),
+  "Mast_cell"             = c("TPSAB1","CPA3","KIT","MS4A2"),
+  "Neutrophil"            = c("FCGR3B","CSF3R","CXCR2","S100A8"),
+  "Platelet"              = c("PPBP","PF4","GP1BA","ITGA2B"),
+  "Epithelial"            = c("EPCAM","KRT8","KRT18","KRT19","CDH1"),
+  "Fibroblast"            = c("COL1A1","COL1A2","DCN","LUM","FAP"),
+  "Endothelial"           = c("PECAM1","CDH5","VWF","ENG","CLDN5"),
+  "Pericyte"              = c("ACTA2","RGS5","PDGFRB","MYH11"),
+  "Neuron"                = c("RBFOX3","MAP2","SYP","SNAP25","TUBB3"),
+  "Astrocyte"             = c("GFAP","AQP4","S100B","ALDH1L1"),
+  "Microglia"             = c("CX3CR1","P2RY12","TMEM119","HEXB"),
+  "Oligodendrocyte"       = c("MBP","MOG","PLP1","MAG"),
+  "Hepatocyte"            = c("ALB","APOB","TTR","CYP3A4","HNF4A"),
+  "Adipocyte"             = c("ADIPOQ","FABP4","LEP","PLIN1","PPARG")
+)
+
+```
+
+```{r}
+##  1.2: Canonical marker list from ref_paper
+canonical_ref <- list(
+  "T cell"            = c("CD3D", "CD3G", "CD4", "CD8A", "IL7R"),
+  "NK cell"           = c("NKG7", "GZMB", "GNLY", "KLRF1"),
+  "Hepatocyte"        = c("ALB", "APOE", "ALDOB"),
+  "Macrophage"        = c("CD68", "CD163", "C1QC"),
+  "Dendritic cell"    = c("CD1C", "FCN1", "LYZ"),
+  "Endothelial cell"  = c("VWF", "EMCN", "CD34"),
+  "B cell"            = c("CD79A", "MS4A1", "IGHM"),
+  "Neutrophil"        = c("CSF3R", "S100A8", "S100A9"),
+  "Hepatic stellate cell" = c("MYH11", "NOTCH3", "RGS5"),
+  "Cholangiocyte"     = c("CLDN4", "CLDN10", "CXCL6"),
+  "Plasma cell"       = c("MKI67", "UBE2C"),
+  "Monocyte"         = c("CD14")
+)
+```
+
+```{r}
+### Source 2: PanglaoDB
+panglaodb_raw <- read.delim(
+  "../markers/PanglaoDB_markers_27_Mar_2020.tsv",
+  stringsAsFactors = FALSE
+)
+```
+
+```{r}
+panglaodb_human <- panglaodb_raw %>%
+  filter(grepl("Hs", species)) %>%
+  select(
+    gene      = official.gene.symbol,
+    cell_type = cell.type,
+    organ     = organ,
+    sens      = sensitivity_human,
+    spec      = specificity_human
+  ) %>%
+  filter(!is.na(gene), gene != "")
+
+build_panglaodb_list <- function(db,
+                                  organ_filter = c("Liver", "Immune system"),
+                                  min_spec     = 0.0) {
+  if (!is.null(organ_filter)) {
+    db <- db %>% filter(organ %in% organ_filter)
+  }
+  if (min_spec > 0) {
+    db <- db %>% filter(!is.na(spec), spec >= min_spec)
+  }
+  marker_list <- db %>%
+    group_by(cell_type) %>%
+    summarise(genes = list(unique(gene)), .groups = "drop")
+  setNames(marker_list$genes, marker_list$cell_type)
+}
+
+# Adjust organ_filter 
+panglao_list <- build_panglaodb_list(
+  panglaodb_human,
+  organ_filter = c("Liver", "Immune system"),
+  min_spec     = 0.0
+)
+```
+
+```{r}
+save(panglao_list, file = "../results/panglao_list.RData")
+```
+
+```{r}
+### Source 3: CellMarker 2.0
+cellmarker_raw <- read_excel("../markers/Cell_marker_Human.xlsx")
+```
+
+```{r}
+cellmarker_clean <- cellmarker_raw %>%
+  filter(cell_type == "Normal cell") %>%
+  select(tissue = tissue_type, cell_type = cell_name, gene = Symbol) %>%
+  filter(!is.na(gene), gene != "", gene != "NA") %>%
+  mutate(gene = strsplit(gene, "[,;]+")) %>%
+  unnest(gene) %>%
+  mutate(gene = trimws(gene)) %>%
+  filter(gene != "")
+
+# Adjust tissue_filter "liver"
+cellmarker_list <- build_cellmarker_list(
+  cellmarker_clean,
+  tissue_filter = "liver"
+)
+```
+
+```{r}
+save(cellmarker_list, file = "../results/cellmarker_list.RData")
+```
+
+```{r}
+# functions.R
+results_canonical  <- run_overlap_all_clusters(
+  top_markers, clusters, canonical_markers, "Canonical")
+results_panglaodb  <- run_overlap_all_clusters(
+  top_markers, clusters, panglao_list, "PanglaoDB")
+results_cellmarker <- run_overlap_all_clusters(
+  top_markers, clusters, cellmarker_list, "CellMarker")
+results_canonical_ref <- run_overlap_all_clusters(
+  top_markers, clusters, canonical_ref, "canonical_ref")
+
+# 
+all_results <- bind_rows(results_canonical,
+                         results_panglaodb,
+                         results_cellmarker,
+                         results_canonical_ref)
+```
+
+```{r}
+write.csv(all_results, "../results/celltype_4DB_top30.csv")
+```
+
+```{r}
+#  Lấy kết quả Top 1 tốt nhất cho mỗi (cluster, source)
+top1_results <- all_results %>%
+  group_by(cluster, source) %>%
+  mutate(
+    tie_breaker = case_when(
+      source %in% c("Canonical", "canonical_ref") ~ pct_ref_covered,
+      source %in% c("CellMarker", "PanglaoDB") ~ pct_query_covered,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  arrange(desc(jaccard_index), desc(tie_breaker)) %>%
+  slice(1) %>%   ##slice_head(n=3), slice(1:3)
+  ungroup() %>%
+  select(-tie_breaker)
+
+top1_results <- top1_results %>%
+  filter(cell_type != "Unknown", jaccard_index > 0)
+```
+
+```{r}
+# Top 3
+top3_results <- all_results %>%
+  filter(cell_type != "Unknown", jaccard_index > 0)%>%
+  group_by(cluster, source) %>%
+  mutate(
+    tie_breaker = case_when(
+      source %in% c("Canonical", "canonical_ref") ~ pct_ref_covered,
+      source %in% c("CellMarker", "PanglaoDB") ~ pct_query_covered,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  arrange(desc(jaccard_index), desc(tie_breaker)) %>%
+  slice_head(n=3) %>%  
+  ungroup() %>%
+  select(-tie_breaker)
+```
+
+```{r}
+write.csv(top1_results, "../results/top1_celltype_4DB_top30.csv")
+```
+
+```{r}
+# % 
+cell_counts <- as.data.frame(table(combined$seurat_clusters))
+colnames(cell_counts) <- c("cluster", "n_cells")
+
+cell_counts <- cell_counts %>%
+  mutate(
+    cluster   = as.numeric(as.character(cluster)),
+    pct_cells = round((n_cells / sum(n_cells)) * 100, 2)
+  )
+
+# Annotation (Cluster 0 -> 24)
+my_annotation <- c(
+  "T cell",            # 0
+  "T cell",            # 1
+  "Hepatocyte",        # 2
+  "Macrophage",        # 3
+  "NK cell",           # 4
+  "Endothelial cell",  # 5
+  "Unknown",           # 6
+  "Hepatocyte",        # 7
+  "Monocyte",          # 8
+  "cDC",               # 9
+  "Neutrophil",        # 10
+  "B cell",            # 11
+  "Unknown",           # 12
+  "HSC",               # 13
+  "Unknown",           # 14
+  "Cholangiocyte",     # 15
+  "Endothelial cell",  # 16
+  "Unknown",           # 17
+  "Unknown",           # 18
+  "Plasma cell",       # 19
+  "Unknown",           # 20
+  "Hepatocyte",        # 21
+  "pDC",               # 22
+  "Endothelial cell",  # 23
+  "Hepatocyte"         # 24
+)
+paper_annotation <- c(
+  "T cell",            # 0
+  "T cell",            # 1
+  "Hepatocyte",        # 2
+  "Macrophage",        # 3
+  "NK cell",           # 4
+  "Endothelial cell",  # 5
+  "Hepatocyte",        # 6
+  "Unknown",           # 7
+  "Monocyte",          # 8
+  "cDC",               # 9
+  "Neutrophil",        # 10
+  "B cell",            # 11
+  "Unknown",           # 12
+  "HSC",               # 13
+  "Unknown",           # 14
+  "Cholangiocyte",     # 15
+  "Unknown",           # 16
+  "Unknown",           # 17
+  "Plasma cell",       # 18
+  "B cell",            # 19
+  "Unknown",           # 20
+  "Unknown",           # 21
+  "Unknown",           # 22
+  "Unknown",           # 23
+  "Unknown"            # 24
+)
+
+
+#
+comparison_df <- cell_counts %>%
+  mutate(
+    my_annotation    = my_annotation,
+    paper_annotation = paper_annotation,
+    # Trạng thái so sánh
+    status = case_when(
+      my_annotation == paper_annotation                                 ~ "Match",
+      paper_annotation == "Unknown" & my_annotation != "Unknown"         ~ "Newly Identified",
+      my_annotation == "Unknown" & paper_annotation != "Unknown"         ~ "Paper Identified",
+      TRUE                                                              ~ "Mismatch"
+    )
+  ) %>%
+  arrange(cluster)
+
+#
+head(comparison_df, 25)
+```
+
+```{r}
+write.csv(comparison_df, "../results/comparion.csv")
+save(comparison_df, file = "../results/comparion.RData")
+```
+
+```{r}
+idx <- match(combined$seurat_clusters, comparison_df$cluster)
+
+combined$cell_type_consensus <- comparison_df$my_annotation[idx]
+combined$paper_annotation    <- comparison_df$paper_annotation[idx]
+
+```
+
+```{r}
+DimPlot(combined, group.by="cell_type_consensus",
+        label=TRUE, repel=TRUE)
+
+DimPlot(combined, group.by="paper_annotation",
+        label=TRUE, repel=TRUE)
+```
+
+```{r}
+#### Re-clustering
+library(Seurat)
+library(dplyr)
+
+unknown_clusters <- comparison_df %>%
+  filter(my_annotation == "Unknown") %>%
+  pull(cluster)
+  
+unknown_obj <- subset(combined, idents = unknown_clusters)
+```
+
+```{r}
+unknown_obj$old_clusters <- unknown_obj$seurat_clusters
+unique(unknown_obj$old_clusters)
+
+# Chuẩn hóa lại & Tìm Variable Features riêng cho nhóm Unknown
+# Tính lại Variable Genes & ScaleData riêng
+DefaultAssay(unknown_obj)
+Layers(unknown_obj)
+
+counts <- LayerData(
+    unknown_obj,
+    assay = "RNA",
+    layer = "counts"
+)
+unknown_obj[["RNA"]] <- CreateAssay5Object(
+    counts = counts
+)
+Layers(unknown_obj[["RNA"]])
+
+#split theo sample
+
+unknown_obj[["RNA"]] <- split(unknown_obj[["RNA"]], f = unknown_obj$sample_id)
+Layers(unknown_obj[["RNA"]])
+
+unknown_obj <- NormalizeData(unknown_obj)
+unknown_obj <- FindVariableFeatures(unknown_obj)
+unknown_obj <- ScaleData(unknown_obj)
+#
+unknown_obj <- RunPCA(unknown_obj, npcs = 30, verbose = FALSE)
+# xem batch
+DimPlot(unknown_obj, reduction = "pca", group.by = "orig.ident")
+
+ElbowPlot(unknown_obj, ndims = 30)
+
+```
+
+```{r}
+options(future.globals.maxSize = 18 * 1024^3)
+
+# RPCA Integration
+unknown_obj <- IntegrateLayers(
+  object = unknown_obj,
+  method = RPCAIntegration,
+  orig.reduction = "pca",
+  dims = 1:20,
+  reference = 1,
+  k.weight = 30,
+  new.reduction = "integrated.rpca",
+  verbose = FALSE
+)
+```
+
+```{r}
+unknown_obj <- JoinLayers(unknown_obj)
+unknown_obj <- FindNeighbors(unknown_obj, dims = 1:20)
+unknown_obj <- FindClusters(unknown_obj, resolution = 0.4)
+unknown_obj <- RunUMAP(unknown_obj, dims = 1:20)
+
+# 
+DimPlot(unknown_obj, reduction = "umap", label = TRUE)
+```
+
+```{r}
+sub_markers <- FindAllMarkers(
+  unknown_obj,
+  only.pos = TRUE,
+  min.pct = 0.25,
+  logfc.threshold = 0.25,
+  test.use        = "wilcox"
+)
+
+```
+
+```{r}
+top_sub_markers <- sub_markers %>%
+  filter(
+    p_val_adj  < 0.05,
+    avg_log2FC > 0.5,
+    pct.1      > 0.25,
+    pct.2      < 0.50
+  ) %>%
+  mutate(
+    specificity_score = pct.1 - pct.2,
+    rank_score        = avg_log2FC * specificity_score
+  ) %>%
+  group_by(cluster) %>%
+  arrange(desc(rank_score), .by_group = TRUE) %>%
+  ungroup()
+
+clusters <- sort(unique(top_sub_markers$cluster))
+cat("Clusters found:", paste(clusters, collapse = ", "), "\n")
+```
+
+```{r}
+#functions.R
+results_canonical  <- run_overlap_all_clusters(
+  top_sub_markers, clusters, canonical_markers, "Canonical")
+results_panglaodb  <- run_overlap_all_clusters(
+  top_sub_markers, clusters, panglao_list, "PanglaoDB")
+results_cellmarker <- run_overlap_all_clusters(
+  top_sub_markers, clusters, cellmarker_list, "CellMarker")
+results_canonical_ref <- run_overlap_all_clusters(
+  top_sub_markers, clusters, canonical_ref, "canonical_ref")
+
+#
+sub_results <- bind_rows(results_canonical,
+                         results_panglaodb,
+                         results_cellmarker,
+                         results_canonical_ref)
+
+# 
+top1_sub <- sub_results %>%
+  filter(cell_type != "Unknown", jaccard_index > 0)%>%
+  group_by(cluster, source) %>%
+  mutate(
+    tie_breaker = case_when(
+      source %in% c("Canonical", "canonical_ref") ~ pct_ref_covered,
+      source %in% c("CellMarker", "PanglaoDB") ~ pct_query_covered,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  arrange(desc(jaccard_index), desc(tie_breaker)) %>%
+  slice(1) %>%   ##slice_head(n=3), slice(1:3)
+  ungroup() %>%
+  select(-tie_breaker)
+```
+
+```{r}
+top3_sub <- sub_results %>%
+  filter(cell_type != "Unknown", jaccard_index > 0)%>%
+  group_by(cluster, source) %>%
+  mutate(
+    tie_breaker = case_when(
+      source %in% c("Canonical", "canonical_ref") ~ pct_ref_covered,
+      source %in% c("CellMarker", "PanglaoDB") ~ pct_query_covered,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  arrange(desc(jaccard_index), desc(tie_breaker)) %>%
+  slice_head(n=3) %>%   ##, slice(1:3)
+  ungroup() %>%
+  select(-tie_breaker)
+```
+
+```{r}
+save(sub_markers, top1_sub, top3_sub, comparison_sub, file = "../results/markers_top1_top_3_sub.RData")
+```
+
+```{r}
+#%
+cell_counts <- as.data.frame(table(unknown_obj$seurat_clusters))
+colnames(cell_counts) <- c("cluster", "n_cells")
+
+cell_counts <- cell_counts %>%
+  mutate(
+    cluster   = as.numeric(as.character(cluster)),
+    pct_cells = round((n_cells / sum(n_cells)) * 100, 2)
+  )
+
+# Annotation
+my_annotation <- c(
+  "Macrophage",            # 0
+  "T cell",            # 1
+  "Endothelial cell",        # 2
+  "cDC",        # 3
+  "Hepatocyte",           # 4
+  "Hepatocyte",  # 5
+  "Hepatocyte",        # 6
+  "Mast cell"      # 7
+  )
+paper_annotation <- c(
+  "Hepatocyte",            # 0
+  "T cell",            # 1
+  "Endothelial cell",        # 2
+  "Unknown" ,        # 3
+ "Unknown" ,           # 4
+  "Unknown" ,  # 5
+ "Unknown" ,        # 6
+  "Unknown"       # 7
+ )
+
+
+comparison_sub <- cell_counts %>%
+  mutate(
+    my_annotation    = my_annotation,
+    paper_annotation = paper_annotation,
+    # Trạng thái so sánh
+    status = case_when(
+      my_annotation == paper_annotation                                 ~ "Match",
+      paper_annotation == "Unknown" & my_annotation != "Unknown"         ~ "Newly Identified",
+      my_annotation == "Unknown" & paper_annotation != "Unknown"         ~ "Paper Identified",
+      TRUE                                                              ~ "Mismatch"
+    )
+  ) %>%
+  arrange(cluster)
+```
+
+```{r}
+# as.character() khi match để tránh lỗi ngầm do Factor gây ra
+idx <- match(as.character(unknown_obj$seurat_clusters), as.character(comparison_sub$cluster))
+
+unknown_obj$my_annotation <- comparison_sub$my_annotation[idx]
+unknown_obj$paper_annotation <- comparison_sub$paper_annotation[idx]
+
+#
+combined$my_annotation <- as.character(combined$cell_type_consensus)
+combined$pap_annotation <- as.character(combined$paper_annotation)
+
+#
+table(combined$my_annotation)
+table(combined$cell_type_consensus)
+
+table(combined$pap_annotation)
+table(combined$paper_annotation)
+
+table <- as.data.frame(combined@meta.data) %>%
+  select(seurat_clusters, my_annotation, cell_type_consensus, pap_annotation, paper_annotation) %>%
+  distinct() # distinct() là hàm chuẩn của dplyr tương đương unique(), chạy nhanh hơn
+
+table2 <- as.data.frame(combined@meta.data) %>%
+  tibble::rownames_to_column(var = "cell_id") %>%  
+  select(cell_id, seurat_clusters, my_annotation, cell_type_consensus, pap_annotation, paper_annotation)
+```
+
+```{r}
+save(table2, file = "../results/celltype_annotation.RData")
+write.csv(table2, "../results/celltype_annotation.csv")
+```
+
+```{r}
+DimPlot(combined, group.by="my_annotation",
+        label=TRUE, repel=TRUE)
+
+DimPlot(combined, group.by="pap_annotation",
+        label=TRUE, repel=TRUE)
+```
+
+```{r}
+saveRDS(combined, "../results/RDS/combined.rds")
+```

@@ -1,0 +1,201 @@
+---
+title: "Integration"
+format: html
+---
+
+```{r}
+source("code/packages.R")
+source("code/functions.R")
+```
+
+###==== seurat_list ==== # 
+
+```{r}
+seurat_list_1 <- readRDS("../results/RDS/seurat_list_1.rds")
+seurat_list_2 <- readRDS("../results/RDS/seurat_list_2.rds")
+seurat_list_3 <- readRDS("../results/RDS/seurat_list_3.rds")
+seurat_list_4 <- readRDS("../results/RDS/seurat_list_4.rds")
+```
+
+```{r}
+head(seurat_list_1[["sample_1"]]@meta.data)
+head(seurat_list_2[["sample_10"]]@meta.data)
+head(seurat_list_3[["sample_19"]]@meta.data)
+head(seurat_list_4[["sample_21"]]@meta.data)
+```
+
+```{r}
+for(i in seq_along(seurat_list_1)){
+
+  seurat_list_1[[i]]$barcode <- Cells(seurat_list_1[[i]])
+
+}
+for(i in seq_along(seurat_list_2)){
+
+  seurat_list_2[[i]]$barcode <- Cells(seurat_list_2[[i]])
+
+}
+
+for(i in seq_along(seurat_list_3)){
+
+  seurat_list_3[[i]]$barcode <- Cells(seurat_list_3[[i]])
+
+}
+
+#for(i in seq_along(seurat_list_4)){
+#
+#  seurat_list_4[[i]]$barcode <- Cells(seurat_list_4[[i]])
+#}
+```
+
+```{r}
+for(i in seq_along(seurat_list_4)){
+  seurat_list_4[[i]]$sample_suffix <- NULL
+}
+```
+
+```{r}
+seurat_list <- c(
+  seurat_list_1,
+  seurat_list_2,
+  seurat_list_3,
+  seurat_list_4
+)
+# Kiểm tra
+length(seurat_list)
+names(seurat_list)
+```
+
+```{r}
+for(i in seq_along(seurat_list)){
+
+  prefix <- unique(seurat_list[[i]]$sample_id)
+
+  seurat_list[[i]] <- RenameCells(
+    seurat_list[[i]],
+    add.cell.id = prefix
+  )
+}
+```
+
+```{r}
+head(Cells(seurat_list[[1]]))
+head(Cells(seurat_list[[20]]))
+```
+
+```{r}
+saveRDS(seurat_list, file = "../results/RDS/seurat_list.rds")
+```
+
+```{r}
+# Merge
+combined <- merge(
+  x = seurat_list[[1]],
+  y = seurat_list[-1]
+)
+```
+
+```{r}
+head(combined@meta.data, 5)
+```
+
+```{r}
+saveRDS(combined, file = "../results/RDS/combined.rds")
+```
+
+```{r}
+ncol(combined)
+nrow(combined)
+object.size(combined)
+```
+
+###==== Integration ==== # 
+
+```{r} 
+rm(list = ls())
+gc()
+```
+
+```{r}
+combined <- readRDS("../results/RDS/combined.rds")
+```
+
+```{r}
+# Preprocessing
+combined <- NormalizeData(combined)
+combined <- FindVariableFeatures(combined)
+combined <- ScaleData(combined)
+combined <- RunPCA(combined, npcs = 30, verbose = FALSE)
+```
+```{r}
+gc()
+```
+
+```{r}
+options(repr.plot.width = 8, repr.plot.height = 8)
+p <- ElbowPlot(combined, ndims = 30)
+p
+```
+
+```{r}
+options(future.globals.maxSize = 23.5 * 1024^3)
+
+# RPCA Integration
+combined <- IntegrateLayers(
+  object = combined,
+  method = RPCAIntegration,
+  orig.reduction = "pca",
+  dims = 1:20,
+  reference = 1,
+  new.reduction = "integrated.rpca",
+  verbose = FALSE
+)
+```
+
+```{r}
+## Recommended
+# Reference-based Integration
+# Here, we use the first layer as a reference for integraion
+# Thus, we only identify anchors between the reference and the rest of the datasets,
+# saving computational resources
+#  reference = 1
+
+# Modifying parameters
+# We can also specify parameters such as `k.anchor` to increase the strength of
+# integration
+
+#  k.anchor = 20
+```
+
+
+```{r}
+DefaultAssay(combined)
+Assays(combined)
+Reductions(combined)
+```
+
+```{r}
+set.seed(1234)
+
+# re-join layers after integration
+combined[["RNA"]] <- JoinLayers(combined[["RNA"]])
+
+combined <- FindNeighbors(combined, reduction = "integrated.rpca", dims = 1:20)
+combined <- FindClusters(combined, resolution = 1)
+combined <- RunUMAP(combined, dims = 1:20, reduction = "integrated.rpca")
+```
+
+```{r}
+options(repr.plot.width = 13, repr.plot.height = 10)
+DimPlot(combined, reduction = "umap", group.by = "sample")
+options(repr.plot.width = 11, repr.plot.height = 10)
+DimPlot(combined, reduction = "umap", group.by = "seurat_clusters")
+```
+
+```{r}
+combined <- FindClusters(combined, resolution = 0.5)
+```
+
+```{r}
+saveRDS(combined, file = "../results/RDS/integrated_obj.rds")
+```

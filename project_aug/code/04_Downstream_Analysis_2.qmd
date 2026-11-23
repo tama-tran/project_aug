@@ -1,0 +1,332 @@
+---
+title: "Downstream_Analysis"
+format: html
+---
+
+```{r}
+source("code/packages.R")
+source("code/functions.R")
+```
+
+```{r}
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+library(patchwork)
+library(pheatmap)
+library(ggplotify)
+```
+
+```{r}
+combined <- readRDS("d:/tienlui/Project_0c72026/results/combined.rds")
+```
+
+### umap
+
+```{r}
+#### UMAP
+### sample
+p1 <- DimPlot(combined, group.by="sample_id",
+        label=TRUE, repel=TRUE)
+### Cluster
+p2 <- DimPlot(combined, group.by="seurat_clusters",
+        label=TRUE, repel=TRUE)
+### Cell type annotaion
+p3 <- DimPlot(combined, group.by="my_annotation",
+      label=TRUE, repel=TRUE) +
+  labs(title = "New_annotation")
+
+p4 <- DimPlot(
+  combined,
+  group.by = "pap_annotation",
+  label = TRUE,repel = TRUE
+) +
+  labs(title = "Paper_annotation")
+
+pp<- p3 + p4
+ppp <- p1 + p2
+
+ggsave(
+  "Fig 1A.png", ppp, width = 12.8, height = 6.5, dpi = 300
+)
+ggsave(
+  "Fig 1B.png", pp, width = 12.8, height = 6.5, dpi = 300
+)
+```
+
+### heatmap
+
+```{r}
+# Canonical markers from paper (canonical_paper)
+canonical_markers <- c(
+  "CD3D", "CD3G", "CD4", "CD8A", "IL7R",
+  "NKG7", "GZMB", "GNLY", "KLRF1",
+  "ALB", "APOE", "ALDOB",
+  "CD68", "CD163", "C1QC",
+  "CD1C", "FCN1", "LYZ",
+  "VWF", "EMCN", "CD34",
+  "CD79A", "MS4A1", "IGHM",
+  "CSF3R", "S100A8", "S100A9",
+  "MYH11", "NOTCH3", "RGS5",
+  "CLDN4", "CLDN10", "CXCL6",
+  "MKI67", "UBE2C",
+  "CD14"
+)
+
+valid_markers <- intersect(canonical_markers, rownames(combined))
+
+celltype_order <- c(
+  "T cell",
+  "NK cell",
+  "Hepatocyte",
+  "Macrophage",
+  "cDC",
+  "pDC",
+  "Endothelial cell",
+  "B cell",
+  "Neutrophil",
+  "HSC",
+  "Cholangiocyte",
+  "Plasma cell",
+  "Monocyte",
+  "Mast cell"
+)
+
+combined$my_annotation <- factor(
+  combined$my_annotation,
+  levels = intersect(celltype_order, unique(as.character(combined$my_annotation)))
+)
+
+#Scale markers
+Idents(combined) <- "my_annotation"
+combined <- ScaleData(combined, features = valid_markers)
+
+p_heatmap <- DoHeatmap(
+  combined,
+  features = valid_markers,
+  group.by = "my_annotation",
+  disp.min = -2.5,
+  disp.max = 2.5,
+  slot = "scale.data",
+  label = FALSE
+) +
+  scale_fill_gradient2(
+    low = "#e0e0e0",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "Expression"
+  ) +
+  theme(
+    axis.text.y = element_text(size = 8, face = "italic", color = "black"),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "right"
+  )
+
+ggsave("../results/pictures/Fig 1C.png",
+       p_heatmap, width = 11, height = 8, dpi = 300)
+```
+
+### bar chart
+```{r}
+#### Bar chart cell composition
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+celltype_order <- c(   
+  "T cell",
+  "cDC",
+  "pDC",
+  "NK cell",
+  "Endothelial cell",
+  "Macrophage",
+  "Hepatocyte",
+  "B cell",
+  "Neutrophil",
+  "HSC",
+  "Cholangiocyte",
+  "Plasma cell",
+  "Monocyte",
+  "Mast cell"
+)
+
+plot_data <- as.data.frame(combined@meta.data) %>%
+  select(condition, my_annotation) %>%
+  filter(!is.na(condition) & !is.na(my_annotation)) %>%
+  
+  count(condition, my_annotation, name = "count") %>%
+  
+  group_by(condition) %>%
+  mutate(percent = count / sum(count)) %>%
+  ungroup() %>%
+
+  mutate(
+    # Đảo ngược order_celltype
+    my_annotation = factor(my_annotation, levels = celltype_order),
+    condition = as.character(condition),
+    condition = ifelse(condition == "cirrhosis", "Cirrhosis", condition),
+    condition = factor(condition, levels = c("Cirrhosis", "HCC", "HBV")) 
+  )
+
+p <- ggplot(plot_data, aes(x = condition, y = percent, fill = my_annotation)) +
+  geom_bar(stat = "identity", position = "fill", width = 0.7, color = "black", linewidth = 0.3) +
+  
+  scale_y_continuous(labels = percent_format(), expand = c(0, 0)) +
+  
+  guides(fill = guide_legend(reverse = FALSE)) +
+  
+  labs(x = "Group", y = "Proportion", fill = "Cell type") +
+  theme_classic() +
+  theme(
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1, color = "black"),
+    axis.text.y = element_text(size = 12, color = "black"),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 2)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 6)),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 11),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1) 
+  ) +
+    scale_y_continuous(expand = expansion(mult = c(0.05, 0.05))
+  )
+ggsave("../results/pictures/Fig 1D.png", p, width = 7, height = 5, dpi = 300)
+```
+
+### box plot
+```{r}
+library(dplyr)
+library(rstatix)
+library(ggpubr)
+library(ggplot2)
+
+celltype_order <- c(  
+  "B cell",
+  "Cholangiocyte",
+  "cDC",
+  "pDC",
+  "Endothelial cell",
+  "HSC",
+  "Hepatocyte",  
+  "Macrophage",
+  "Monocyte",  
+  "Neutrophil",
+  "NK cell",
+  "Plasma cell",
+  "T cell",
+  "Mast cell"
+)
+
+plot_data <- as.data.frame(combined@meta.data) %>%
+  select(condition, my_annotation, sample_id) %>%
+  count(sample_id, condition, my_annotation, name = "n_cell") %>%
+  group_by(sample_id) %>%
+  mutate(percent = n_cell / sum(n_cell) * 100) %>%
+  ungroup()%>%
+  mutate(
+    my_annotation = factor(my_annotation, levels = celltype_order),
+    condition = as.character(condition),
+    condition = ifelse(condition == "cirrhosis", "Cirrhosis", condition),
+    condition = factor(condition, levels = c("Cirrhosis", "HCC", "HBV")) 
+  )
+
+n_celltype <- length(levels(plot_data$my_annotation))
+
+my_comparisons <- list(
+  c("HBV", "Cirrhosis"),
+  c("Cirrhosis", "HCC"),
+  c("HBV", "HCC")
+)
+
+## no adjust
+# stat.test <- plot_data %>%
+#   group_by(my_annotation) %>%
+#   pairwise_wilcox_test(
+#     percent ~ condition,
+#     comparisons = my_comparisons,
+#     p.adjust.method = "none"
+#   ) %>%
+#   add_significance("p") %>%
+#   add_xy_position(x = "my_annotation", dodge = 0.8)
+
+stat.test <- plot_data %>%
+  group_by(my_annotation) %>%
+  pairwise_wilcox_test(
+    percent ~ condition,
+    comparisons = my_comparisons,
+    p.adjust.method = "BH"
+  ) %>%
+  add_significance("p.adj") %>%
+  add_xy_position( x = "my_annotation", dodge = 0.8)
+
+
+stat.test <- stat.test %>%
+  mutate(
+    y.position = case_when(
+      (group1 == "HBV" & group2 == "Cirrhosis") | (group1 == "Cirrhosis" & group2 == "HBV") ~ 87,
+      (group1 == "Cirrhosis" & group2 == "HCC") | (group1 == "HCC" & group2 == "Cirrhosis") ~ 92,
+      (group1 == "HBV" & group2 == "HCC")       | (group1 == "HCC" & group2 == "HBV")       ~ 97
+    )
+  )
+
+box <- ggboxplot(
+  plot_data,
+  x = "my_annotation",
+  y = "percent",
+  color = "condition",
+  fill = "white",                 # Đặt fill = "white" để ruột boxplot che hoàn toàn đường kẻ
+  palette = c("#F8766D", "#00BA38", "#619CFF"),
+  width = 0.6,
+  outlier.size = 1.1,
+  xlab = "Cell type",
+  ylab = "Percentage (%)",
+  title = "Boxplots of Percentages by Cell Type"
+)
+
+# ---  geom_vline làm lớp nền ---
+box$layers <- c(
+  geom_vline(
+    xintercept = as.vector(
+      sapply(1:n_celltype, function(x) c(x - 0.27, x + 0.27))
+    ),
+    color = "grey92",
+    linewidth = 0.4,
+    inherit.aes = FALSE
+  ),
+  box$layers 
+)
+
+box <- box +
+  stat_pvalue_manual(
+    stat.test,
+    label = "p.adj.signif", #label = "p.signif",
+    hide.ns = FALSE,
+    tip.length = 0.01,
+    bracket.linewidth = 0.4,
+    label.size = 3.5
+  ) +
+
+  scale_y_continuous(breaks = c(0, 25, 50, 75)) + 
+  coord_cartesian(ylim = c(0, 100)) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "plain"),
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9, color = "black"),
+    axis.text.y = element_text(size = 10, color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 12),
+    legend.title = element_text(size = 11),
+    legend.position = "right",
+    
+    # Tắt grid mặc định của theme để tránh chồng chéo với geom_vline
+    panel.grid.major.x = element_line(color = "grey90", linewidth = 0.5), 
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(color = "Group")
+
+print(box)
+
+ggsave("../results/pictures/Fig 1E.png", box, width = 12.8, height = 6.5, dpi = 300)
+```
